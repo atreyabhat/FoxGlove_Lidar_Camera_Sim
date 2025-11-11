@@ -8,13 +8,12 @@ import base64
 from pathlib import Path
 from mcap.writer import Writer
 from mcap.well_known import SchemaEncoding, MessageEncoding
-from utils.helpers import get_pose, setup_simulation
+from utils.helpers import setup_simulation, get_pose
 
 def load_config(config_path="config.yaml"):
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
-
-
+    
 def main():
     cfg = load_config()
     datapath, output_mcap, start_pos, R, motion_vec, K = setup_simulation(cfg)
@@ -22,17 +21,18 @@ def main():
     print(f"Loading point cloud from {datapath}...")
     pcd = o3d.io.read_point_cloud(datapath)
     
+    #downsample if enabled
     if cfg['processing']['downsample_enabled']:
         voxel_size = cfg['processing']['voxel_size_m']
         print(f"Downsampling with voxel size {voxel_size}m...")
         pcd = pcd.voxel_down_sample(voxel_size=voxel_size)
 
-    # Apply offset ONCE to the whole cloud
+    # offset points to UTM origin as described by the authors
     points = np.asarray(pcd.points) - np.array(cfg['world']['utm_offset'])
     pcd.points = o3d.utility.Vector3dVector(points)
 
-    points_world = np.asarray(pcd.points).T # (3, N)
-    colors_world = np.asarray(pcd.colors).T # (3, N)
+    points_world = np.asarray(pcd.points).T
+    colors_world = np.asarray(pcd.colors).T
     print(f"Loaded {points_world.shape[1]} points.")
 
     # Simulation Loop Parameters
@@ -45,7 +45,7 @@ def main():
         writer = Writer(f)
         writer.start()
 
-        # Register Foxglove CompressedImage schema
+        # register schema and channel for foxglove.CompressedImage
         schema_id = writer.register_schema(
             name="foxglove.CompressedImage",
             encoding=SchemaEncoding.JSONSchema,
@@ -59,77 +59,55 @@ def main():
         for i in range(total_frames):
             print(f"Processing frame {i+1}/{total_frames}...", end="\r")
             
-            # Get current camera position 't'
             t = get_pose(i, total_frames, start_pos, motion_vec, speed_mps, fps)
 
-            # 1. Transform world points to camera coordinates
-            # P_cam = R * (P_world - t)
+            # transform and project points
             points_cam = R @ (points_world - t.reshape(3, 1))
 
-            # 2. Project to 2D
-            valid_mask = points_cam[2, :] > 0.1 # 10cm threshold
+            valid_mask = points_cam[2, :] > 0.1
             p_valid = points_cam[:, valid_mask]
             c_valid = colors_world[:, valid_mask]
 
-            if p_valid.shape[1] == 0:
-                continue
+            if p_valid.shape[1] == 0: continue
 
-            # Apply projection matrix K
             p_proj = K @ p_valid
-            
-            # Avoid division by zero
             p_proj[2, p_proj[2, :] == 0] = 1e-6
-            
             u = (p_proj[0, :] / p_proj[2, :]).astype(int)
             v = (p_proj[1, :] / p_proj[2, :]).astype(int)
             depths = p_proj[2, :]
 
-            # 3. Filter points inside image bounds
+            # filter with image bounds
             mask = (u >= 0) & (u < W) & (v >= 0) & (v < H)
             u, v, depths = u[mask], v[mask], depths[mask]
             c_final = c_valid[:, mask]
 
-            # 4. Render image (Painter's Algorithm)
+            # render image
             img = np.zeros((H, W, 3), dtype=np.uint8)
             if u.size > 0:
-                # Sort by depth, farthest first
                 order = np.argsort(depths)[::-1]
                 u_sorted, v_sorted = u[order], v[order]
                 c_sorted = c_final[:, order]
-                
-                # Convert RGB (0-1) to BGR (0-255) for OpenCV
                 colors_bgr = (c_sorted.T[:, [2, 1, 0]] * 255).astype(np.uint8)
-                
-                # Draw pixels
                 img[v_sorted, u_sorted] = colors_bgr
 
-            # 5. Post-processing
+            # post-processing: blur and noise
             if cfg['camera']['blur_enabled']:
                 k = cfg['camera']['blur_kernel_size']
                 img = cv2.GaussianBlur(img, (k, k), 0)
-            
             if cfg['camera']['noise_enabled']:
                 noise = np.random.normal(0, cfg['camera']['noise_sigma'], img.shape)
                 img = cv2.add(img, noise.astype(np.uint8))
 
-            # 6. Encode and Write to MCAP
+            # encode to JPEG and write to mcap
             _, jpeg_data = cv2.imencode('.jpg', img)
-            
             frame_time_ns = start_ns + int(i * (1e9 / fps))
-            
             msg = {
                 "timestamp": {"sec": frame_time_ns // 10**9, "nsec": frame_time_ns % 10**9},
                 "frame_id": "camera_link",
                 "format": "jpeg",
                 "data": base64.b64encode(jpeg_data.tobytes()).decode('utf-8')
             }
-            
-            writer.add_message(
-                channel_id,
-                log_time=frame_time_ns,
-                data=json.dumps(msg).encode('utf-8'),
-                publish_time=frame_time_ns
-            )
+            writer.add_message(channel_id, frame_time_ns, json.dumps(msg).encode('utf-8'), frame_time_ns)
 
     print(f"\nCamera simulation finished! Output: {output_mcap}")
 

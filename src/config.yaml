@@ -1,9 +1,9 @@
 paths:
   # Relative paths from where the script is run
   dataset_dir: "../dataset/Toronto_3D"
-  ply_filename: "Toronto_combined.ply"
+  ply_filename: "L001.ply"
   result_dir: "../results"
-  camera_mcap_filename: "camera_sim.mcap"
+  camera_mcap_filename: "camera_sim_v1_downsampled.mcap"
   lidar_mcap_filename: "lidar_sim.mcap"
 
 world:
@@ -13,9 +13,9 @@ world:
   utm_offset: [627285.0, 4841948.0, 0.0]
 
 simulation:
-  duration_sec: 1
-  fps: 5
-  speed_mps: 15.0
+  duration_sec: 15
+  fps: 10
+  speed_mps: 15
 
 camera:
   width: 1920
@@ -24,7 +24,7 @@ camera:
   yaw_offset_deg: -18.0
 
   blur_enabled: true
-  blur_kernel_size: 5
+  blur_kernel_size: 3
   noise_enabled: true
   noise_sigma: 0.1
 
@@ -37,5 +37,5 @@ lidar:
   accuracy_m: 0.03
 
 processing:
-  downsample_enabled: true
-  voxel_size_m: 0.03
+  downsample_enabled: false
+  voxel_size_m: 0.1
