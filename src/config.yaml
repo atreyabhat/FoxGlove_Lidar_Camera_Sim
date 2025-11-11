@@ -13,14 +13,14 @@ world:
   utm_offset: [627285.0, 4841948.0, 0.0]
 
 simulation:
-  duration_sec: 15
+  duration_sec: 5
   fps: 10
   speed_mps: 15
   debug_viz: true
 
 processing:
   downsample_enabled: true
-  voxel_size_m: 0.1
+  voxel_size_m: 0.2
 
 camera:
   width: 1280
@@ -38,7 +38,6 @@ lidar:
   points_per_second: 100000
   channels: 32
   vertical_fov_deg: [-10.0, 30.0]
-  horizontal_fov_deg: [-180.0, 180.0]
   angle_threshold_deg: 0.5
-  accuracy_m: 0.03
+  horizontal_bins: 2188     #700K/sec at 10Hz with 32 beams
 
