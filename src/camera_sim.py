@@ -18,6 +18,10 @@ def main():
     cfg = load_config()
     datapath, output_mcap, start_pos, R, motion_vec, K = setup_simulation(cfg)
 
+    dist_cfg = cfg['camera'].get('distortion', {})
+    dist_enabled = dist_cfg.get('enabled', False)
+    D = np.array(dist_cfg.get('D', [0.0, 0.0, 0.0, 0.0, 0.0])) 
+
     print(f"Loading point cloud from {datapath}...")
     pcd = o3d.io.read_point_cloud(datapath)
     
@@ -41,6 +45,9 @@ def main():
     speed_mps = cfg['simulation']['speed_mps']
     W, H = cfg['camera']['width'], cfg['camera']['height']
 
+    rvec_zeros = np.zeros(3, dtype=np.float32)
+    tvec_zeros = np.zeros(3, dtype=np.float32)
+
     with open(output_mcap, "wb") as f:
         writer = Writer(f)
         writer.start()
@@ -57,7 +64,10 @@ def main():
         start_ns = time.time_ns()
 
         for i in range(total_frames):
-            print(f"Processing frame {i+1}/{total_frames}...", end="\r")
+            # print(f"Processing frame {i+1}/{total_frames}...", end="\r")
+
+            #log processing time
+            start_process = time.time()
             
             t = get_pose(i, total_frames, start_pos, motion_vec, speed_mps, fps)
 
@@ -70,11 +80,30 @@ def main():
 
             if p_valid.shape[1] == 0: continue
 
-            p_proj = K @ p_valid
-            p_proj[2, p_proj[2, :] == 0] = 1e-6
-            u = (p_proj[0, :] / p_proj[2, :]).astype(int)
-            v = (p_proj[1, :] / p_proj[2, :]).astype(int)
-            depths = p_proj[2, :]
+            depths = p_valid[2, :]
+
+            if dist_enabled:
+                p_valid_cv = p_valid.T  #for opwncv 
+
+                projected_pixels, _ = cv2.projectPoints(
+                    p_valid_cv,
+                    rvec_zeros, 
+                    tvec_zeros,
+                    K,          
+                    D    #distortion coefficients
+                )
+                
+                # Squeeze to make (N, 1, 2) to (N, 2)
+                projected_pixels = projected_pixels.squeeze()
+                u = projected_pixels[:, 0].astype(int)
+                v = projected_pixels[:, 1].astype(int)
+
+            else:
+                p_proj = K @ p_valid
+                p_proj[2, p_proj[2, :] == 0] = 1e-6
+                u = (p_proj[0, :] / p_proj[2, :]).astype(int)
+                v = (p_proj[1, :] / p_proj[2, :]).astype(int)
+                depths = p_proj[2, :]
 
             # filter with image bounds
             mask = (u >= 0) & (u < W) & (v >= 0) & (v < H)
@@ -90,17 +119,15 @@ def main():
                 colors_bgr = (c_sorted.T[:, [2, 1, 0]] * 255).astype(np.uint8)
                 img[v_sorted, u_sorted] = colors_bgr
 
-            # post-processing: blur and noise
-            if cfg['camera']['blur_enabled']:
-                k = cfg['camera']['blur_kernel_size']
-                img = cv2.GaussianBlur(img, (k, k), 0)
-            if cfg['camera']['noise_enabled']:
-                noise = np.random.normal(0, cfg['camera']['noise_sigma'], img.shape)
-                img = cv2.add(img, noise.astype(np.uint8))
-
             # encode to JPEG and write to mcap
             _, jpeg_data = cv2.imencode('.jpg', img)
             frame_time_ns = start_ns + int(i * (1e9 / fps))
+
+
+            #log frame processing time
+            end_process = time.time()
+            print(f"Frame {i+1}/{total_frames} processed in {(end_process - start_process)*1000:.1f} ms", end=" " * 10 + "\r")
+
             msg = {
                 "timestamp": {"sec": frame_time_ns // 10**9, "nsec": frame_time_ns % 10**9},
                 "frame_id": "camera_link",

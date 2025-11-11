@@ -1,10 +1,10 @@
 paths:
   # Relative paths from where the script is run
   dataset_dir: "../dataset/Toronto_3D"
-  ply_filename: "L001.ply"
+  ply_filename: "L002.ply"
   result_dir: "../results"
-  camera_mcap_filename: "camera_sim_v1_downsampled.mcap"
-  lidar_mcap_filename: "lidar_sim.mcap"
+  camera_mcap_filename: "camera_sim_v1.mcap"
+  lidar_mcap_filename: "lidar_sim_v1.mcap"
 
 world:
   # Original world coordinates
@@ -17,25 +17,26 @@ simulation:
   fps: 10
   speed_mps: 15
 
-camera:
-  width: 1920
-  height: 1080
-  focal_length_px: 960.0
-  yaw_offset_deg: -18.0
+processing:
+  downsample_enabled: true
+  voxel_size_m: 0.03
 
-  blur_enabled: true
-  blur_kernel_size: 3
-  noise_enabled: true
-  noise_sigma: 0.1
+camera:
+  width: 1280
+  height: 960  #tesla cam resolution
+  yaw_offset_deg: -17.0
+
+  distortion:
+    enabled: true
+    # Distortion coefficients: (k1, k2, p1, p2, k3), changing k1 here for bulge effect
+    D: [0.25, 0.0, 0.0, 0.0, 0.0]
+
 
 lidar:
   range_m: 100.0
   points_per_second: 100000
-  channels: 32
+  channels: 16
   vertical_fov_deg: [-10.0, 30.0]
   horizontal_fov_deg: [-180.0, 180.0]
   accuracy_m: 0.03
 
-processing:
-  downsample_enabled: false
-  voxel_size_m: 0.1
