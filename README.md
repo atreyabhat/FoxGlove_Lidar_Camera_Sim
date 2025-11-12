@@ -1,4 +1,4 @@
-# Simulating Camera and Lidar sensors moving through a static pointcloud and visualizing with FoxGlove
+## Simulating Camera and Lidar sensors moving through a static pointcloud and visualizing with FoxGlove
 
 
 The package replays static datasets (e.g., Toronto_3D) through a virtual ego-vehicle, emits MCAP logs that follow Foxglove schemas, and makes it easy to visualize synchronized RGB and point cloud streams.
