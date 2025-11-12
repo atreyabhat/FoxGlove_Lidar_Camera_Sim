@@ -1,11 +1,12 @@
+"""
+This script simulates a LiDAR model moving through a static pointcloud. 
+"""
+
 import numpy as np
 import open3d as o3d
-import cv2
 import time
 import yaml
-import struct
 from pathlib import Path
-
 import foxglove
 from foxglove.channels import PointCloudChannel, SceneUpdateChannel
 from foxglove.schemas import (
@@ -13,7 +14,6 @@ from foxglove.schemas import (
     PackedElementFieldNumericType, Pose, Vector3, Quaternion
 )
 from foxglove.schemas import SceneUpdate, SceneEntity, ModelPrimitive
-
 from utils.helpers import setup_simulation, get_pose
 from scipy.spatial.transform import Rotation as R
 
@@ -102,9 +102,7 @@ def main():
 
         print("Adding car model...")
         car_channel = SceneUpdateChannel(topic="/car_model")
-        
-        # This finds the script's own folder and looks for "car.glb"
-        # __file__ is the path to your .py script
+
         model_path = (Path(__file__).parent.parent / "assets"/ "f1_car_concept.glb").as_uri()
         
         
@@ -112,13 +110,11 @@ def main():
             entities=[
                 SceneEntity(
                     timestamp=Timestamp(sec=0, nsec=0), 
-                    frame_id="base_link", # Fixed to base_link
+                    frame_id="base_link",
                     id="the_car",
                     models=[
                         ModelPrimitive(
                             url=model_path,
-                            # --- THIS IS THE FIX ---
-                            # Add scale and pose to control the model
                             scale=Vector3(x=0.6, y=0.6, z=0.6),
                             pose=Pose(
                                 position=Vector3(x=0, y=0, z=-1.0),
@@ -129,7 +125,7 @@ def main():
                 )
             ]
         )
-        # Write the car model *once* at the beginning
+
         car_channel.log(car_scene, log_time=start_ns)
 
         for i in range(total_frames):
@@ -206,7 +202,7 @@ def main():
             
             
             if final_num_points == 0:
-                continue # skip frame if no points are visible
+                continue #skip
 
             
             points_xyz = final_points_lidar.T.astype(np.float32)
@@ -224,7 +220,6 @@ def main():
                 position=Vector3(x=0.0, y=0.0, z=0.0),
                 orientation=Quaternion(x=q_dict['x'], y=q_dict['y'], z=q_dict['z'], w=q_dict['w'])
             )
-
             
             pc_msg = PointCloud(
                 timestamp=ts_obj,

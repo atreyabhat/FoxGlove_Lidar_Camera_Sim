@@ -3,8 +3,9 @@ paths:
   dataset_dir: "../dataset/Toronto_3D"
   ply_filename: "L002.ply"
   result_dir: "../results"
-  camera_mcap_filename: "camera_sim_v1.mcap"
-  lidar_mcap_filename: "lidar_sim_v1.mcap"
+  camera_mcap_filename: "camera_sim.mcap"
+  lidar_mcap_filename: "lidar_sim.mcap"
+
 
 world:
   # Original world coordinates
@@ -23,8 +24,8 @@ processing:
   voxel_size_m: 0.1
 
 camera:
-  width: 1280
-  height: 960  #tesla cam resolution
+  width: 1280 
+  height: 720   
   yaw_offset_deg: -17.0
   topic: "/camera"
 

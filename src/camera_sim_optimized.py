@@ -1,3 +1,9 @@
+"""
+This script simulates a pinhole camera moving through a static LIDAR pointcloud data. 
+Once the image is rendered, LAMA Inpainting model is used to reconstruct the missing pieces in the render.
+Finally both the images+timestamps are written to MCAP file in 2 topics.
+"""
+
 import numpy as np
 import open3d as o3d
 import cv2
@@ -10,10 +16,12 @@ from mcap.writer import Writer
 from mcap.well_known import SchemaEncoding, MessageEncoding
 from utils.helpers import setup_simulation, get_pose
 import numba
+import torch
+from simple_lama_inpainting import SimpleLama
 
-#replacing sorting function with numba z-buffer rendering
-# this change alone drops upto 1s per frame in processing time
 
+
+#numba render for faster z-buffering
 @numba.njit(fastmath=True)
 def render_frame_numba(H, W, u, v, depths, colors_bgr):
     """
@@ -32,6 +40,7 @@ def render_frame_numba(H, W, u, v, depths, colors_bgr):
             img[v_i, u_i, :] = colors_bgr[i, :]
 
     return img
+
 
 def load_config(config_path="config.yaml"):
     with open(config_path, 'r') as f:
@@ -81,22 +90,28 @@ def main():
             encoding=SchemaEncoding.JSONSchema,
             data='{"type": "object", "properties": {"timestamp": {"type": "object", "properties": {"sec": {"type": "integer"}, "nsec": {"type": "integer"}}}, "frame_id": {"type": "string"}, "format": {"type": "string"}, "data": {"type": "string", "contentEncoding": "base64"}}}'.encode('utf-8')
         )
-        channel_id = writer.register_channel(cfg['camera']['topic'], MessageEncoding.JSON, schema_id)
+        
+        original_topic = cfg['camera']['topic']
+        original_channel_id = writer.register_channel(original_topic, MessageEncoding.JSON, schema_id)
+        inpainted_topic = original_topic + "/inpainted"
+        inpainted_channel_id = writer.register_channel(inpainted_topic, MessageEncoding.JSON, schema_id)
 
+        #load simple-lama
+        device = "mps" if torch.mps.is_available() else "cpu"
+        lama = SimpleLama(device=device)
+
+        print("Lama model loaded.")
         print(f"Starting simulation ({total_frames} frames)...")
-        start_ns = 1704067200 * 1_000_000_000
+
+        start_ns = 1704067200 * 1_000_000_000 #hardcoded to sync lidar and camera
 
         for i in range(total_frames):
-            # print(f"Processing frame {i+1}/{total_frames}...", end="\r") # OPT: Moved this print to the end of the loop
-
-            #log processing time
             start_process = time.time()
             
             curr_pose = get_pose(i, total_frames, start_pos, motion_vec, speed_mps, fps)
 
             # transform and project points
             points_cam = R @ (points_world - curr_pose.reshape(3, 1))
-
             valid_mask = points_cam[2, :] > 0.1
             p_valid = points_cam[:, valid_mask]
             c_valid = colors_world[:, valid_mask]
@@ -104,56 +119,66 @@ def main():
             if p_valid.shape[1] == 0: continue
             depths = p_valid[2, :]
 
-            if dist_enabled:
-                p_valid_cv = p_valid.T  #for opwncv 
-
-                projected_pixels, _ = cv2.projectPoints(
-                    p_valid_cv,
-                    rvec_zeros, 
-                    tvec_zeros,
-                    K,          
-                    D    #distortion coefficients
-                )
-                
-                projected_pixels = projected_pixels.squeeze()
-                u = projected_pixels[:, 0].astype(int)
-                v = projected_pixels[:, 1].astype(int)
-
-            else:
-                p_proj = K @ p_valid
-                p_proj[2, p_proj[2, :] == 0] = 1e-6
-                u = (p_proj[0, :] / p_proj[2, :]).astype(int)
-                v = (p_proj[1, :] / p_proj[2, :]).astype(int)
-                # depths = p_proj[2, :] # Depths already grabbed earlier
-
+            
+            p_valid_cv = p_valid.T  #for opwncv 
+            projected_pixels, _ = cv2.projectPoints(p_valid_cv,rvec_zeros, tvec_zeros, K, D)  #distortion coefficients
+            projected_pixels = projected_pixels.squeeze()
+            u = projected_pixels[:, 0].astype(int)
+            v = projected_pixels[:, 1].astype(int)
+            
             # filter with image bounds
             mask = (u >= 0) & (u < W) & (v >= 0) & (v < H)
             u, v, depths = u[mask], v[mask], depths[mask]
             c_final = c_valid[:, mask]
-
-            colors_bgr = (c_final.T[:, [2, 1, 0]] * 255).astype(np.uint8)  
-            #optimized rendering using numba              
+            colors_bgr = (c_final.T[:, [2, 1, 0]] * 255).astype(np.uint8) 
+            
             img = render_frame_numba(H, W, u, v, depths, colors_bgr)
 
-
+            frame_time_ns = start_ns + int(i * (1e9 / fps))
+            
+            #publishing original sparse image
             # encode to JPEG and write to mcap
             _, jpeg_data = cv2.imencode('.jpg', img)
-            frame_time_ns = start_ns + int(i * (1e9 / fps))
-
-            
-            #log frame processing time
-            end_process = time.time()
-            print(f"Frame {i+1}/{total_frames} processed in {(end_process - start_process)*1000:.1f} ms", end=" " * 10 + "\r")
-
             msg = {
                 "timestamp": {"sec": frame_time_ns // 10**9, "nsec": frame_time_ns % 10**9},
                 "frame_id": "base_link",
                 "format": "jpeg",
                 "data": base64.b64encode(jpeg_data.tobytes()).decode('utf-8')
             }
-            writer.add_message(channel_id, frame_time_ns, json.dumps(msg).encode('utf-8'), frame_time_ns)
+            writer.add_message(original_channel_id, frame_time_ns, json.dumps(msg).encode('utf-8'), frame_time_ns)
+
+
+            # generate and publish the inpainted image
+            mask = cv2.inRange(img, (0, 0, 0), (0, 0, 0))
+
+            # didnt make much difference, commenting in the name of efficiency
+            # kernel = np.ones((3,3), np.uint8)
+            # mask_dilated = cv2.dilate(mask, kernel, iterations=1)
+            # cv2.imshow("Mask", mask_dilated)
+            # cv2.waitKey(0)
+
+
+            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            img_inpainted_pil = lama(img_rgb, mask)
+
+            img_inpainted_rgb = np.array(img_inpainted_pil)
+            img_inpainted_bgr = cv2.cvtColor(img_inpainted_rgb, cv2.COLOR_RGB2BGR)
+
+            _, jpeg_data_inpainted = cv2.imencode('.jpg', img_inpainted_bgr)
+
+            inpainted_msg = {
+                "timestamp": {"sec": frame_time_ns // 10**9, "nsec": frame_time_ns % 10**9},
+                "frame_id": "base_link",
+                "format": "jpeg",
+                "data": base64.b64encode(jpeg_data_inpainted.tobytes()).decode('utf-8')
+            }
+            writer.add_message(inpainted_channel_id, frame_time_ns, json.dumps(inpainted_msg).encode('utf-8'), frame_time_ns)
+            
+            end_process = time.time()
+            print(f"Frame {i+1}/{total_frames} processed in {(end_process - start_process)*1000:.1f} ms", end=" " * 10 + "\r")
 
     print(f"\nCamera simulation finished! Output: {output_mcap}")
+
 
 if __name__ == "__main__":
     main()

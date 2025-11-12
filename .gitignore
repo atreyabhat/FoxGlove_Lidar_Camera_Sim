@@ -3,3 +3,4 @@ notebooks/notebook.ipynb
 src/utils/__pycache__/
 results/*
 *.mcap
+lama/

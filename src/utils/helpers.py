@@ -47,7 +47,7 @@ def setup_simulation(cfg, sensor_type='camera'):
     motion_dir = R_cam_to_world[:, 2]  # forward direction in world frame
 
     #fix drift
-    motion_dir[2] = motion_dir[2] - 0.02  # eliminating vertical drift, need a better solution
+    motion_dir[2] = motion_dir[2] - 0.02  # eliminating vertical drift because of road level, need a better solution
 
     motion_vec = motion_dir / np.linalg.norm(motion_dir)  # normalize
 
