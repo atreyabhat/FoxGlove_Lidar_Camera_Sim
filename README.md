@@ -5,7 +5,7 @@ The package replays static datasets (e.g., Toronto_3D) through a virtual ego-veh
 
 <!-- <img width="1383" height="1107" alt="Screenshot 2025-11-12 at 3 44 11 PM" src="https://github.com/user-attachments/assets/5c0ed64b-a24c-4862-a1de-3538fdb9e8c1" /> -->
 
-![foxglove_result](https://github.com/user-attachments/assets/3a37d73e-3b7f-4e0b-9fc3-e3639bd1ee65)
+![foxglove_result](https://github.com/user-attachments/assets/2404bd12-2938-41ed-a325-f4e5178493c6)
 
 
 ## Features
