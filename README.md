@@ -11,7 +11,7 @@ The package replays static datasets (e.g., Toronto_3D) through a virtual ego-veh
 
 ## Features
 - Camera render by projecting colorized point clouds with added distortion and MCAP output.
-- Simple-Lama image inpainting is implemented for the camera render, producing much more realistic images
+- Simple-Lama image inpainting is implemented to refine the camera render, producing much more realistic images
   
 - LiDAR simulator that enforces per-channel vertical FOV, horizontal binning, occlusion, and logs to Foxglove `PointCloud` messages.
 - Configurable trajectory, frame rate, downsampling, and dataset paths via a single `config.yaml`.
